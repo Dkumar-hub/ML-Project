@@ -103,7 +103,7 @@
     if (sequence.length === 30) {
       const payload = { keypoints: sequence.flat() };
 
-      fetch('http://127.0.0.1:5000/predict', {
+      fetch('https://silver-palm-tree-jj4gg75wjwr4h5vp7-5000.app.github.dev/predict', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
