@@ -17,7 +17,7 @@ A third LSTM layer processes the attention-weighted sequence to extract meaningf
 
 Fully connected dense layers for final classification.
 
-Output: Softmax layer predicting one of 4 sign language classes: Hello, Thank You, I Love You, and Sorry.
+Output: Softmax layer predicting one of 5 ASL sign language classes: Hello, Goodbye, Sorry, Thank you, No.
 
 Features
 Captures spatial-temporal features from hand movement sequences.
