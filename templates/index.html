@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Sign Language Detector</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/holistic/holistic.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+  <style>
+    video, canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      border-radius: 12px;
+    }
+  </style>
+</head>
+<body class="bg-gray-900 text-white font-sans">
+  <div class="flex flex-col items-center justify-center min-h-screen p-4">
+    <h1 class="text-3xl font-bold mb-6">🤟 Human Sign Language Detection System</h1>
+
+    <div class="relative w-[640px] h-[480px] mb-6 shadow-lg rounded-xl overflow-hidden">
+      <video id="video" width="640" height="480" autoplay muted></video>
+      <canvas class="output_canvas" id="output_canvas" width="640" height="480"></canvas>
+    </div>
+
+    <div id="prediction" class="text-xl text-green-400 font-semibold mb-4">
+      Waiting for prediction...
+    </div>
+
+    <button id="toggleButton" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">
+      🔴 Prediction OFF
+    </button>
+  </div>
+
+ <script>
+  const videoElement = document.getElementById('video');
+  const canvasElement = document.getElementById('output_canvas');
+  const canvasCtx = canvasElement.getContext('2d');
+  const predictionDiv = document.getElementById('prediction');
+  const toggleBtn = document.getElementById('toggleButton');
+
+  let sequence = [];
+  let predictionsQueue = [];
+  let predictionEnabled = false;
+  let frameCount = 0;
+
+  const holistic = new Holistic({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/holistic/${file}` });
+  holistic.setOptions({
+    modelComplexity: 0,
+    smoothLandmarks: true,
+    minDetectionConfidence: 0.6,
+    minTrackingConfidence: 0.6,
+    selfieMode: true
+  });
+
+  function speak(text) {
+    const msg = new SpeechSynthesisUtterance(text);
+    msg.lang = 'en-US';
+    msg.rate = 1;
+    window.speechSynthesis.speak(msg);
+  }
+
+  function updatePredictionQueue(prediction) {
+    predictionsQueue.push(prediction);
+    if (predictionsQueue.length > 5) predictionsQueue.shift();
+
+    const frequency = {};
+    predictionsQueue.forEach(p => frequency[p] = (frequency[p] || 0) + 1);
+
+    const [mostFrequent, count] = Object.entries(frequency).reduce((a, b) => (a[1] > b[1] ? a : b));
+    return count >= 2 ? mostFrequent : null;
+  }
+
+  holistic.onResults(results => {
+    frameCount++;
+    if (frameCount % 3 === 0) return;
+
+
+    canvasCtx.save();
+    canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+    canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+
+    if (results.leftHandLandmarks) {
+      drawConnectors(canvasCtx, results.leftHandLandmarks, HAND_CONNECTIONS, { color: '#00FF00', lineWidth: 2 });
+      drawLandmarks(canvasCtx, results.leftHandLandmarks, { color: '#FF0000', lineWidth: 1 });
+    }
+    if (results.rightHandLandmarks) {
+      drawConnectors(canvasCtx, results.rightHandLandmarks, HAND_CONNECTIONS, { color: '#0000FF', lineWidth: 2 });
+      drawLandmarks(canvasCtx, results.rightHandLandmarks, { color: '#FFFF00', lineWidth: 1 });
+    }
+    canvasCtx.restore();
+
+    if (!predictionEnabled) return;
+
+    const extract = (lm) => lm ? lm.flatMap(p => [p.x, p.y, p.z]) : new Array(21 * 3).fill(0);
+    const frame = [...extract(results.leftHandLandmarks), ...extract(results.rightHandLandmarks)];
+    if (frame.every(val => val === 0)) return;
+
+    sequence.push(frame);
+
+    if (sequence.length === 30) {
+      const payload = { keypoints: sequence.flat() };
+
+      fetch('http://127.0.0.1:5000/predict', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      })
+      .then(res => res.json())
+      .then(data => {
+        sequence = sequence.slice(-5);  // Sliding window
+
+        if (data.prediction && data.confidence > 0.6) {
+          const stable = updatePredictionQueue(data.prediction);
+          if (stable) {
+            predictionDiv.innerText = `Prediction: ${stable} (${Math.round(data.confidence * 100)}%)`;
+            speak(stable);
+          }
+        } else {
+          predictionDiv.innerText = "Waiting for confident prediction...";
+        }
+      })
+      .catch(err => {
+        console.error("Prediction error:", err);
+        predictionDiv.innerText = "Error: " + err.message;
+        sequence = [];
+      });
+    }
+  });
+
+  const camera = new Camera(videoElement, {
+    onFrame: async () => {
+      await holistic.send({ image: videoElement });
+    },
+    width: 640,
+    height: 480
+  });
+  camera.start();
+
+  toggleBtn.addEventListener('click', () => {
+    predictionEnabled = !predictionEnabled;
+    toggleBtn.textContent = predictionEnabled ? "🟢 Prediction ON" : "🔴 Prediction OFF";
+    predictionDiv.innerText = "Prediction: None";
+    predictionsQueue = [];
+    sequence = [];
+  });
+</script>
+</body>
+</html>
+
